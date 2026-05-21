@@ -363,13 +363,30 @@ export class ProductboardMCPServer {
       let skippedCount = 0;
       const { userPermissions } = this.dependencies;
 
+      // Wodify hardening: belt-and-braces read-only mode. When
+      // PRODUCTBOARD_READ_ONLY=true, do not register any tool whose minimum
+      // access level is above READ, regardless of what the token allows. This
+      // protects against prompt-injection-driven destructive tool calls even
+      // when the API token has broader scope than intended.
+      const readOnlyMode = process.env.PRODUCTBOARD_READ_ONLY === 'true';
+      if (readOnlyMode) {
+        logger.warn('PRODUCTBOARD_READ_ONLY=true — write and delete tools will not be registered');
+      }
+
       for (const ToolConstructor of toolConstructors) {
         try {
           logger.debug(`Processing ${ToolConstructor.name}...`);
-          
+
           // Create a tool instance
           const toolInstance = new ToolConstructor(apiClient, logger);
-          
+
+          // Wodify hardening: skip non-read tools when read-only mode is on.
+          if (readOnlyMode && toolInstance.permissionMetadata?.minimumAccessLevel !== AccessLevel.READ) {
+            logger.info(`Skipping ${ToolConstructor.name} - read-only mode active`);
+            skippedCount++;
+            continue;
+          }
+
           // Check if user has permission to use this tool (only if permissions are available)
           if (userPermissions && !toolInstance.isAvailableForUser(userPermissions)) {
             const missingPermissions = toolInstance.getMissingPermissions(userPermissions);

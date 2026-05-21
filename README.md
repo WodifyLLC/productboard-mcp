@@ -1,6 +1,18 @@
-# productboard-mcp
+# productboard-mcp (Wodify fork)
 
 An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server for the [Productboard](https://www.productboard.com) API. Enables AI assistants (Claude, Cursor, etc.) to interact with your Productboard workspace.
+
+> **This is the WodifyLLC hardened fork of [Enreign/productboard-mcp](https://github.com/Enreign/productboard-mcp), branched from upstream tag `v0.3.0`.**
+>
+> Changes vs. upstream:
+> - **`src/auth/bearer.ts`** — removed `this.logger.debug('Headers', this.getHeaders(token))` (leaked the bearer token to stderr on every validation). Internal logger no longer hardcoded to `debug`; respects `LOG_LEVEL`. Removed `NODE_ENV === "development"` auth-validation bypass.
+> - **`src/api/client.ts`** — removed `NODE_ENV === "development"` connection-test bypass.
+> - **`src/core/server.ts`** — added `PRODUCTBOARD_READ_ONLY=true` env flag that prevents any write/delete tool from being registered, regardless of API-token scope.
+> - **`config/default.json`** — fixed `cache.enabled` drift with `ConfigManager` defaults.
+> - **`.env.example`** — `NODE_ENV=production`, `LOG_LEVEL=error`, `LOG_PRETTY=false`, and `PRODUCTBOARD_READ_ONLY=true` by default.
+> - Removed leftover `src/auth/bearer.ts.backup`.
+>
+> Pin this fork at a specific commit SHA in your MCP config — do not track `main`.
 
 ## Tools
 

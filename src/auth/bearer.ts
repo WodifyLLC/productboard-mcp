@@ -2,6 +2,7 @@ import { AuthHeaders } from './types.js';
 import { ProductboardAPIError } from '@api/errors.js';
 import axios, { AxiosError } from 'axios';
 import { Logger } from '@utils/logger.js';
+import { LogLevel } from '@utils/types.js';
 
 export class BearerTokenAuth {
   // private readonly baseUrl: string;
@@ -9,21 +10,29 @@ export class BearerTokenAuth {
 
   constructor(_baseUrl: string) {
     // this.baseUrl = baseUrl;
-    this.logger = new Logger({ level: 'debug', name: 'bearer-auth' });
+    // Respect the configured LOG_LEVEL instead of hardcoding 'debug'.
+    // Wodify patch: prevents this internal logger from emitting at debug level
+    // (which previously logged the Authorization header on every call).
+    const envLevel = (process.env.LOG_LEVEL as LogLevel | undefined);
+    this.logger = new Logger({ level: envLevel || 'error', name: 'bearer-auth' });
   }
 
   async validateToken(token: string): Promise<boolean> {
-    // Development bypass
-    if (process.env.NODE_ENV === "development" || process.env.SKIP_TOKEN_VALIDATION === "true") {
-      this.logger.debug("Skipping token validation in development mode");
+    // Wodify patch: removed the NODE_ENV === "development" bypass — it was a
+    // silent way to disable auth validation just by setting an env var, and
+    // the upstream .env.example ships with NODE_ENV=development. The explicit
+    // SKIP_TOKEN_VALIDATION flag is retained for intentional opt-out.
+    if (process.env.SKIP_TOKEN_VALIDATION === "true") {
+      this.logger.warn("SKIP_TOKEN_VALIDATION=true — bypassing bearer token validation");
       return true;
     }
-    
+
     try {
       const url = "https://api.productboard.com/v2/entities?type[]=feature";
       this.logger.debug('Bearer token validation URL', { url });
-      this.logger.debug('Headers', this.getHeaders(token));
-      
+      // Wodify patch: do NOT log the Authorization header — it contains the
+      // bearer token in plaintext.
+
       // Use /features endpoint for token validation (without parameters)
       const response = await axios.get(url, {
         headers: this.getHeaders(token),

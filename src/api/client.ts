@@ -272,12 +272,10 @@ export class ProductboardAPIClient {
   }
 
   async testConnection(): Promise<boolean> {
+    // Wodify patch: removed the NODE_ENV === "development" bypass that
+    // silently skipped the API connection probe. server.ts already guards
+    // this whole call path with NODE_ENV !== 'test'.
     try {
-      // Skip connection test in development mode
-      if (process.env.NODE_ENV === "development") {
-        this.logger.debug("Skipping API connection test in development mode");
-        return true;
-      }
       await this.get('/entities', { 'type[]': 'feature' });
       return true;
     } catch (error) {

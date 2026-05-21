@@ -21,7 +21,7 @@
     }
   },
   "cache": {
-    "enabled": true,
+    "enabled": false,
     "ttl": 300,
     "maxSize": 100
   },
