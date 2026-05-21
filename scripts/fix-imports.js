@@ -24,7 +24,10 @@ const aliasToDir = {
 function getRelativePath(fromFile, toDir) {
   const fromDir = dirname(fromFile);
   const toPath = join(distDir, toDir);
-  const relativePath = relative(fromDir, toPath);
+  // Wodify patch: normalize to forward slashes. On Windows, path.relative()
+  // returns backslashes, which when embedded in JS import strings get parsed
+  // as `\u`, `\n`, etc. escape sequences and break module loading.
+  const relativePath = relative(fromDir, toPath).split('\\').join('/');
   return relativePath.startsWith('.') ? relativePath : `./${relativePath}`;
 }
 

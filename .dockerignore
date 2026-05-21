@@ -1,0 +1,27 @@
+node_modules
+dist
+.git
+.gitignore
+.env
+.env.local
+.env.example
+*.log
+
+# Local-only artifacts
+.mcpb
+*.mcpb
+
+# Tests / docs / IDE
+tests
+coverage
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+
+# README, manifest stays for build but skill files (if any) excluded
+*.skill
+
+# CI / GitHub
+.github

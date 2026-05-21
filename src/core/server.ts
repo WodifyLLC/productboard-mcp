@@ -224,8 +224,6 @@ export class ProductboardMCPServer {
   }
 
   private initializeMCPServer(): void {
-    const { logger, toolRegistry } = this.dependencies;
-
     this.server = new Server(
       {
         name: 'productboard-mcp',
@@ -240,15 +238,53 @@ export class ProductboardMCPServer {
 
     this.transport = new StdioServerTransport();
 
-    // Tools handlers
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+    this.wireHandlers(this.server);
+  }
+
+  /**
+   * Wodify HTTP-mode addition: factory that returns a fresh, fully-wired SDK
+   * Server. Used by the HTTP transport which creates one Server per session.
+   * The expensive bootstrap (auth validation, permission discovery, tool
+   * registration) already ran once in initialize(); only the lightweight
+   * handler wiring happens per session.
+   */
+  public createMcpServer(): Server {
+    const server = new Server(
+      {
+        name: 'productboard-mcp',
+        version: pkg.version,
+      },
+      {
+        capabilities: {
+          tools: {},
+        },
+      },
+    );
+    this.wireHandlers(server);
+    return server;
+  }
+
+  private wireHandlers(server: Server): void {
+    const { logger, toolRegistry } = this.dependencies;
+
+    // Tools handlers.
+    //
+    // The `as any` casts below sidestep an incompatibility between SDK type
+    // versions: depending on the resolved @modelcontextprotocol/sdk patch,
+    // setRequestHandler's handler parameter type is either RequestHandler<T>
+    // (single arg) or a stricter (request, extra) signature. Casting keeps
+    // the same code compiling in both Windows local and Linux Docker builds.
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (server.setRequestHandler as any)(ListToolsRequestSchema, async () => {
       return {
         tools: toolRegistry.listTools(),
       };
     });
 
     // Tool execution handler
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (server.setRequestHandler as any)(CallToolRequestSchema, async (request: any) => {
       const startTime = Date.now();
       this.metrics.requestsTotal++;
       this.metrics.activeConnections++;

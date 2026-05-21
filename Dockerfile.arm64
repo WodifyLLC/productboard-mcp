@@ -1,0 +1,78 @@
+# arm64-pinned build of productboard-mcp.
+#
+# Why a separate file:
+#   - The default Dockerfile is multi-arch friendly (node:20-alpine has both
+#     amd64 and arm64 variants under the same tag) and is what you build for
+#     local Docker Desktop on an amd64 Windows laptop.
+#   - This file pins linux/arm64 on every FROM, so you cannot accidentally
+#     produce an amd64 image when targeting AWS Fargate Graviton (arm64).
+#     Fargate Graviton tasks are ~20% cheaper than x86 Fargate.
+#
+# How to build:
+#   docker buildx build --platform linux/arm64 -f Dockerfile.arm64 \
+#     -t <ecr-registry>/productboard-mcp:latest-arm64 --push .
+#
+# The first build cross-compiles via QEMU on an amd64 host — slower than a
+# native amd64 build, but produces a real arm64 image. Native arm64 hardware
+# (M1/M2 Mac, Graviton) builds in seconds.
+#
+# Once pushed, the ECS task definition needs runtimePlatform set:
+#   {
+#     "runtimePlatform": { "cpuArchitecture": "ARM64", "operatingSystemFamily": "LINUX" },
+#     ...
+#   }
+
+# ---- builder stage: compile TypeScript ----
+FROM --platform=linux/arm64 node:20-alpine AS builder
+WORKDIR /app
+
+# Install all deps (including devDependencies for tsc)
+COPY package.json package-lock.json* ./
+RUN npm ci --include=dev
+
+# Compile
+COPY tsconfig.json ./
+COPY scripts ./scripts
+COPY src ./src
+RUN npm run build
+
+# Drop dev deps for a smaller runtime install
+RUN npm prune --omit=dev
+
+
+# ---- runtime stage: lean image ----
+FROM --platform=linux/arm64 node:20-alpine
+WORKDIR /app
+
+# Tini for proper PID-1 signal handling
+RUN apk add --no-cache tini curl
+
+# Non-root user for the app. UID/GID are pinned so the (optional) EFS access
+# point in production can enforce a stable POSIX identity. 10001 picked to
+# avoid clashes with alpine's default users group (1000) and system uids.
+RUN addgroup -g 10001 app && adduser -u 10001 -G app -D -H app
+
+# Copy compiled output, pruned production deps, and the default config file
+# (ConfigManager reads ./config/default.json from cwd at startup).
+COPY --from=builder --chown=app:app /app/node_modules ./node_modules
+COPY --from=builder --chown=app:app /app/dist ./dist
+COPY --chown=app:app package.json ./
+COPY --chown=app:app config ./config
+
+# Defaults baked into the image. Override at task-definition / docker-run level.
+ENV NODE_ENV=production
+ENV LOG_LEVEL=error
+ENV LOG_PRETTY=false
+ENV MCP_HTTP_HOST=0.0.0.0
+ENV MCP_HTTP_PORT=8000
+# Wodify hardening: read-only mode on by default. Override only when intended.
+ENV PRODUCTBOARD_READ_ONLY=true
+
+USER app
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8000/healthz || exit 1
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "dist/index.js", "serve"]
