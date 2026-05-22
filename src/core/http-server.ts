@@ -309,11 +309,17 @@ export async function startHttpServer(
 
         const mcp = server.createMcpServer();
         transport.onclose = () => {
+          // Do NOT call mcp.close() here. The SDK's Server.close() internally
+          // calls transport.close(), which re-triggers this onclose handler,
+          // which would call mcp.close() again — infinite recursion until
+          // RangeError: Maximum call stack size exceeded. Observed on task
+          // shutdown after SIGTERM. The transport is the lifecycle owner;
+          // once it's closed the Server is effectively dead with no separate
+          // resources to release.
           if (transport.sessionId) {
             sessions.delete(transport.sessionId);
             logger.debug(`MCP session closed: ${transport.sessionId} (active: ${sessions.size})`);
           }
-          mcp.close().catch((err) => logger.warn('Error closing MCP server', err));
         };
 
         await mcp.connect(transport);
