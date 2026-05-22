@@ -4,6 +4,8 @@ import { ProductboardMCPServer } from '@core/server.js';
 import { startHttpServer, HttpServerHandle } from '@core/http-server.js';
 import { ConfigManager } from '@utils/config.js';
 import { Logger } from '@utils/logger.js';
+import { McpOAuthProvider } from '@auth/mcp-oauth-provider.js';
+import { loadGoogleOAuthConfig } from '@auth/google-oauth-config.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -73,7 +75,18 @@ async function main(): Promise<void> {
 
     if (subcommand === 'serve' || subcommand === 'http') {
       // HTTP mode — for container deployment behind an ALB.
-      httpHandle = await startHttpServer(server, logger, getVersion());
+      // OAuth is opt-in: requires MCP_PUBLIC_URL + GOOGLE_CLIENT_ID +
+      // GOOGLE_CLIENT_SECRET. When unset, /mcp runs open.
+      const googleCfg = loadGoogleOAuthConfig();
+      let oauthProvider: McpOAuthProvider | undefined;
+      if (googleCfg) {
+        oauthProvider = new McpOAuthProvider(googleCfg, logger);
+        await oauthProvider.loadFromDisk();
+      }
+      httpHandle = await startHttpServer(server, logger, getVersion(), {
+        oauth: oauthProvider,
+        publicUrl: process.env.MCP_PUBLIC_URL,
+      });
       logger.info(`Productboard MCP HTTP server ready on port ${httpHandle.port}`);
     } else {
       // stdio mode (default) — for Claude Desktop / Cursor local installation.
