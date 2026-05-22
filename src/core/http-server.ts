@@ -24,6 +24,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 
 import { ProductboardMCPServer } from './server.js';
 import { Logger } from '@utils/logger.js';
+import { makeAccessLog } from './access-log.js';
 
 // Inline helper: the SDK exports `isInitializeRequest` from types.js at runtime
 // but moduleResolution: node fails to see it through the wildcard subpath
@@ -53,7 +54,12 @@ export async function startHttpServer(
   const port = Number.parseInt(process.env.MCP_HTTP_PORT || '8000', 10);
 
   const app = express();
+  // Trust the ALB so X-Forwarded-For is honored by req.ip in access logs.
+  app.set('trust proxy', 1);
   app.use(express.json({ limit: '4mb' }));
+  // Access log fires on every request after express.json has parsed the body
+  // so debug-level body peek has something to capture.
+  app.use(makeAccessLog(logger));
 
   const sessions = new Map<string, Session>();
   const startedAt = Date.now();
@@ -126,8 +132,11 @@ export async function startHttpServer(
     }
   });
 
+  // GET /mcp doubles as an ALB health-check endpoint for Wodify's managed MCP
+  // platform, which probes the same path the protocol uses. Return 200 so the
+  // target stays healthy. (Matches g-suite-mcp's behavior.)
   app.get('/mcp', (_req: Request, res: Response) => {
-    res.status(405).json({ error: 'Method Not Allowed; use POST /mcp' });
+    res.status(200).json({ ok: true, transport: 'streamable-http', method: 'POST' });
   });
 
   app.delete('/mcp', async (req: Request, res: Response) => {

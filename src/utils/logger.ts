@@ -84,4 +84,9 @@ export class Logger {
     childLogger.pino = childPino;
     return childLogger;
   }
+
+  /** Mirrors pino.isLevelEnabled — used by access-log to gate debug-body capture. */
+  isLevelEnabled(level: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'): boolean {
+    return this.pino.isLevelEnabled(level);
+  }
 }
