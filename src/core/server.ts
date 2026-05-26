@@ -399,6 +399,25 @@ export class ProductboardMCPServer {
       let skippedCount = 0;
       const { userPermissions } = this.dependencies;
 
+      // Wodify hardening: explicit tool allowlist. When PRODUCTBOARD_EXPOSED_TOOLS
+      // is set to a comma-separated list, ONLY tools whose .name appears in the
+      // list are registered. Use this to gate unvetted tools at runtime without
+      // removing them from the codebase — the tool source stays in place, it
+      // just doesn't get advertised via tools/list or accept calls.
+      // Empty/unset = no allowlist (current behavior, all tools considered).
+      const exposedToolsRaw = process.env.PRODUCTBOARD_EXPOSED_TOOLS || '';
+      const exposedTools = exposedToolsRaw
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      const exposedToolsSet = new Set(exposedTools);
+      const allowlistActive = exposedTools.length > 0;
+      if (allowlistActive) {
+        logger.warn(
+          `PRODUCTBOARD_EXPOSED_TOOLS allowlist active — only registering: ${exposedTools.join(', ')}`,
+        );
+      }
+
       // Wodify hardening: belt-and-braces read-only mode. When
       // PRODUCTBOARD_READ_ONLY=true, do not register any tool whose minimum
       // access level is above READ, regardless of what the token allows. This
@@ -415,6 +434,15 @@ export class ProductboardMCPServer {
 
           // Create a tool instance
           const toolInstance = new ToolConstructor(apiClient, logger);
+
+          // Wodify hardening: explicit tool allowlist (most restrictive — applied first).
+          // When PRODUCTBOARD_EXPOSED_TOOLS is set, only tools whose name appears
+          // in the list are registered. Everything else is silently skipped.
+          if (allowlistActive && !exposedToolsSet.has(toolInstance.name)) {
+            logger.info(`Skipping ${ToolConstructor.name} (${toolInstance.name}) - not in PRODUCTBOARD_EXPOSED_TOOLS allowlist`);
+            skippedCount++;
+            continue;
+          }
 
           // Wodify hardening: skip non-read tools when read-only mode is on.
           if (readOnlyMode && toolInstance.permissionMetadata?.minimumAccessLevel !== AccessLevel.READ) {
