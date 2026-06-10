@@ -1,0 +1,171 @@
+{
+  "widgets": [
+    {
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 24,
+      "height": 3,
+      "properties": {
+        "markdown": "# Productboard MCP Usage Monitoring\nAdoption metrics from the productboard MCP server (log group `/ecs/PRODUCTBOARD-MCP`). **Data begins when per-request usage logging shipped** (the access-log `user_email` / `mcp_method` / `tool_name` fields). Health-check traffic has no `user_email` and is auto-excluded from user metrics. **\"tool calls\"** = `mcp_method=\"tools/call\"` (actual work); **\"requests\"** also includes `initialize` / `tools/list`. Adjust the time range at the top-right to change every widget."
+      }
+    },
+    {
+      "type": "log",
+      "x": 0,
+      "y": 3,
+      "width": 8,
+      "height": 4,
+      "properties": {
+        "region": "us-east-1",
+        "title": "Active users (selected range)",
+        "view": "table",
+        "query": "SOURCE '/ecs/PRODUCTBOARD-MCP' | filter ispresent(user_email) | stats count_distinct(user_email) as active_users"
+      }
+    },
+    {
+      "type": "log",
+      "x": 8,
+      "y": 3,
+      "width": 8,
+      "height": 4,
+      "properties": {
+        "region": "us-east-1",
+        "title": "Tool calls (selected range)",
+        "view": "table",
+        "query": "SOURCE '/ecs/PRODUCTBOARD-MCP' | filter mcp_method = \"tools/call\" | stats count(*) as tool_calls"
+      }
+    },
+    {
+      "type": "log",
+      "x": 16,
+      "y": 3,
+      "width": 8,
+      "height": 4,
+      "properties": {
+        "region": "us-east-1",
+        "title": "Total MCP requests (selected range)",
+        "view": "table",
+        "query": "SOURCE '/ecs/PRODUCTBOARD-MCP' | filter path = \"/mcp\" | stats count(*) as requests"
+      }
+    },
+    {
+      "type": "log",
+      "x": 0,
+      "y": 7,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "region": "us-east-1",
+        "title": "Daily active users",
+        "view": "bar",
+        "query": "SOURCE '/ecs/PRODUCTBOARD-MCP' | filter ispresent(user_email) | stats count_distinct(user_email) as daily_active_users by bin(1d)"
+      }
+    },
+    {
+      "type": "log",
+      "x": 12,
+      "y": 7,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "region": "us-east-1",
+        "title": "Daily tool calls",
+        "view": "bar",
+        "query": "SOURCE '/ecs/PRODUCTBOARD-MCP' | filter mcp_method = \"tools/call\" | stats count(*) as tool_calls by bin(1d)"
+      }
+    },
+    {
+      "type": "log",
+      "x": 0,
+      "y": 13,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "region": "us-east-1",
+        "title": "Tool calls per user",
+        "view": "bar",
+        "query": "SOURCE '/ecs/PRODUCTBOARD-MCP' | filter mcp_method = \"tools/call\" and ispresent(user_email) | stats count(*) as tool_calls by user_email | sort tool_calls desc"
+      }
+    },
+    {
+      "type": "log",
+      "x": 12,
+      "y": 13,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "region": "us-east-1",
+        "title": "Tool popularity",
+        "view": "bar",
+        "query": "SOURCE '/ecs/PRODUCTBOARD-MCP' | filter mcp_method = \"tools/call\" | stats count(*) as calls by tool_name | sort calls desc"
+      }
+    },
+    {
+      "type": "log",
+      "x": 0,
+      "y": 19,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "region": "us-east-1",
+        "title": "Tool usage (by tool)",
+        "view": "table",
+        "query": "SOURCE '/ecs/PRODUCTBOARD-MCP' | filter mcp_method = \"tools/call\" | stats count(*) as calls by tool_name | sort calls desc | limit 100"
+      }
+    },
+    {
+      "type": "log",
+      "x": 12,
+      "y": 19,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "region": "us-east-1",
+        "title": "Server usage (by user)",
+        "view": "table",
+        "query": "SOURCE '/ecs/PRODUCTBOARD-MCP' | filter mcp_method = \"tools/call\" | stats count(*) as tool_calls by user_email | sort tool_calls desc | limit 100"
+      }
+    },
+    {
+      "type": "log",
+      "x": 0,
+      "y": 25,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "region": "us-east-1",
+        "title": "Request type mix (initialize / tools-list / tools-call)",
+        "view": "pie",
+        "query": "SOURCE '/ecs/PRODUCTBOARD-MCP' | filter path = \"/mcp\" and ispresent(mcp_method) | stats count(*) as count by mcp_method"
+      }
+    },
+    {
+      "type": "log",
+      "x": 12,
+      "y": 25,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "region": "us-east-1",
+        "title": "Per-user tool usage (user x tool)",
+        "view": "table",
+        "query": "SOURCE '/ecs/PRODUCTBOARD-MCP' | filter mcp_method = \"tools/call\" | stats count(*) as calls by user_email, tool_name | sort calls desc | limit 100"
+      }
+    },
+    {
+      "type": "log",
+      "x": 0,
+      "y": 31,
+      "width": 24,
+      "height": 6,
+      "properties": {
+        "region": "us-east-1",
+        "title": "Recent tool calls",
+        "view": "table",
+        "query": "SOURCE '/ecs/PRODUCTBOARD-MCP' | filter mcp_method = \"tools/call\" | fields @timestamp, user_email, tool_name, status, duration_ms | sort @timestamp desc | limit 100",
+        "timezone": "-0400"
+      }
+    }
+  ]
+}
