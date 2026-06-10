@@ -6,6 +6,7 @@ import { ConfigManager } from '@utils/config.js';
 import { Logger } from '@utils/logger.js';
 import { McpOAuthProvider } from '@auth/mcp-oauth-provider.js';
 import { loadGoogleOAuthConfig } from '@auth/google-oauth-config.js';
+import { syncUsageDashboard } from '@core/dashboard-sync.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -88,6 +89,12 @@ async function main(): Promise<void> {
         publicUrl: process.env.MCP_PUBLIC_URL,
       });
       logger.info(`Productboard MCP HTTP server ready on port ${httpHandle.port}`);
+
+      // Self-register the usage dashboard baked into this image. Fire-and-
+      // forget: failures are logged, never block serving. Skipped in tests.
+      if (process.env.NODE_ENV !== 'test') {
+        void syncUsageDashboard(logger);
+      }
     } else {
       // stdio mode (default) — for Claude Desktop / Cursor local installation.
       await server.start();

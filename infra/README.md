@@ -1,9 +1,8 @@
 # infra/
 
-AWS resources for the productboard MCP server that are managed outside the
-`wodify-custom-mcp-deploy` CloudFormation stack (which owns the ECR repo, ECS
-service, ALB wiring, etc.). Keep these definitions here so they're reproducible
-and editable via PR rather than only living in the AWS console.
+AWS-facing definitions that ship **inside the container image** plus the IAM
+notes for the pieces other people own. Keep these in the repo so they're
+reproducible and editable via PR rather than only living in the AWS console.
 
 ## `cloudwatch-usage-dashboard.json`
 
@@ -17,30 +16,25 @@ daily-tool-calls trends, tool-calls-per-user and tool-popularity bars,
 by-tool and by-user usage tables, request-type pie, user×tool table, and a
 recent-tool-calls activity log.
 
-### Recreate or update the dashboard
+### How it deploys — no manual step
 
-After editing the JSON, push it to CloudWatch (account 212972612334, us-east-1):
+This file is `COPY`'d into the image (see Dockerfile) and the server
+self-registers it at startup via `cloudwatch:PutDashboard`
+(`src/core/dashboard-sync.ts`). **Deploying an image IS the dashboard
+deployment**: edit this JSON, push the image, and the next task boot syncs
+the dashboard. Failures are non-fatal (warn-and-continue) so a missing IAM
+permission never blocks serving.
 
-```bash
-aws cloudwatch put-dashboard \
-  --dashboard-name Productboard-MCP-Usage-Monitoring \
-  --region us-east-1 \
-  --dashboard-body file://infra/cloudwatch-usage-dashboard.json
-```
+Runtime controls:
 
-`put-dashboard` is create-or-replace: it overwrites the entire dashboard body,
-so this file is the single source of truth. A successful run returns
-`"DashboardValidationMessages": []`.
+| Env var | Default | Meaning |
+|---|---|---|
+| `USAGE_DASHBOARD_SYNC` | `true` | Set `false` to disable the startup sync |
+| `USAGE_DASHBOARD_NAME` | `Productboard-MCP-Usage-Monitoring` | Dashboard name to write |
 
-Alternatively, manage it as a CloudFormation stack (drift-detectable):
-
-```bash
-node scripts/build-dashboard-stack.mjs
-aws cloudformation deploy \
-  --stack-name productboard-mcp-dashboard \
-  --template-file infra/cloudwatch-usage-dashboard.cfn.json \
-  --region us-east-1
-```
+Prerequisite: the ECS task role needs `cloudwatch:PutDashboard` — see
+`IAM-TASK-ROLE.md` (owner: Matt). Until it lands, startup logs a warning and
+the dashboard simply doesn't materialize.
 
 ### View it
 
@@ -56,6 +50,16 @@ https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashbo
   `PRODUCTBOARD_EXPOSED_TOOLS`), so the tool-popularity widgets will show a
   single bar until the allowlist is widened — the dashboard already handles
   multiple tools the moment more are exposed.
-- If you add/rename log fields in `access-log.ts`, update the queries here to match.
+- If you add/rename log fields in `access-log.ts`, update the queries here to
+  match.
 - `user_email` is PII — the `/ecs/PRODUCTBOARD-MCP` log group should have a
   deliberate retention set (infra owner: Matt).
+
+## `IAM-CI-SETUP.md`
+
+Permissions the shared GitHub-OIDC deploy role needs so CI can push images.
+
+## `IAM-TASK-ROLE.md`
+
+The ECS task-role addition (Matt's framework template) that lets the container
+self-register the dashboard.

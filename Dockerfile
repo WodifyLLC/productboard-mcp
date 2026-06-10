@@ -40,6 +40,10 @@ COPY --from=builder --chown=app:app /app/node_modules ./node_modules
 COPY --from=builder --chown=app:app /app/dist ./dist
 COPY --chown=app:app package.json ./
 COPY --chown=app:app config ./config
+# Usage-dashboard definition — the server self-registers it with CloudWatch
+# at startup (src/core/dashboard-sync.ts), so deploying this image IS the
+# dashboard deployment.
+COPY --chown=app:app infra ./infra
 
 # Defaults baked into the image. Override at task-definition / docker-run level.
 ENV NODE_ENV=production

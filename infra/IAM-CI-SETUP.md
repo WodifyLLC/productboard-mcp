@@ -4,11 +4,12 @@
 `wodify-github-custom-mcp-deploy` (account `212972612334`) via GitHub OIDC.
 
 **Trust policy: no change needed.** It already allows
-`repo:WodifyLLC/*:*`, which covers this repo.
+`repo:WodifyLLC/*:*`, which covers this repo. (Verified: the workflow's
+"Configure AWS credentials (OIDC)" step succeeds today.)
 
-**Permission policy: needs two additions** the role doesn't have today —
-pushing images to ECR and managing CloudWatch dashboards. Add this statement
-block (or a separate attached policy, owner's choice):
+**Permission policy: needs ECR push** — the role can describe repositories
+but not push images. Add this statement block (or a separate attached policy,
+owner's choice):
 
 ```json
 [
@@ -31,36 +32,21 @@ block (or a separate attached policy, owner's choice):
       "ecr:PutImage"
     ],
     "Resource": "arn:aws:ecr:us-east-1:212972612334:repository/productboard-mcp"
-  },
-  {
-    "Sid": "CloudWatchUsageDashboards",
-    "Effect": "Allow",
-    "Action": [
-      "cloudwatch:PutDashboard",
-      "cloudwatch:GetDashboard",
-      "cloudwatch:DeleteDashboards",
-      "cloudwatch:ListDashboards"
-    ],
-    "Resource": "*"
   }
 ]
 ```
 
 Notes:
 
-- `ecr:GetAuthorizationToken` and `cloudwatch:ListDashboards` don't support
-  resource-level scoping — `"*"` is required for those.
-- The ECR push statement is scoped to the `productboard-mcp` repository only.
-  To let other MCP repos use the same CI pattern later, widen the resource to
+- `ecr:GetAuthorizationToken` doesn't support resource-level scoping — `"*"`
+  is required for it.
+- The push statement is scoped to the `productboard-mcp` repository only. To
+  let other MCP repos use the same CI pattern later, widen the resource to
   `arn:aws:ecr:us-east-1:212972612334:repository/*` (or add per-repo ARNs).
-- Dashboard ARNs are account-global (`arn:aws:cloudwatch::212972612334:dashboard/*`,
-  no region). Scope the dashboard actions to that pattern instead of `"*"` if
-  preferred; `ListDashboards` still needs `"*"`.
-- The role already has `cloudformation:*`, which covers the dashboard stack
-  (`productboard-mcp-dashboard`) create/update itself — the CloudWatch actions
-  above are what CloudFormation calls on the role's behalf for the
-  `AWS::CloudWatch::Dashboard` resource.
+- The CloudWatch usage dashboard needs **no CI permissions** — it's baked into
+  the image and self-registered by the container at startup, which is covered
+  by the ECS **task role** instead. See `IAM-TASK-ROLE.md`.
 
-Until this lands, the workflow's ECR-login step fails with `AccessDenied` —
-that's the expected failure mode, nothing else in the run mutates state before
-it.
+Until this lands, the workflow fails at the "Log in to ECR" step with
+`AccessDenied` — that's the expected failure mode; nothing in the run mutates
+state before that step.

@@ -1,17 +1,17 @@
-name: Deploy image + dashboard
+name: Deploy image
 
-# One push = full deploy:
-#   1. Build the arm64 image and push to ECR :latest.
-#      (The wodify-custom-mcp-deploy stack's EventBridge rule sees the push
-#      and force-redeploys the ECS service automatically — no action here.)
-#   2. Deploy the CloudWatch usage dashboard as a CloudFormation stack, so
-#      dashboard changes ride the same commit as the code that emits the
-#      log fields it queries.
+# One push = full deploy. This workflow only builds and pushes the image;
+# everything else cascades from that automatically:
+#   - The wodify-custom-mcp-deploy stack's EventBridge rule sees the ECR push
+#     and force-redeploys the ECS service.
+#   - The container self-registers the CloudWatch usage dashboard at startup
+#     (src/core/dashboard-sync.ts) from the definition baked into the image
+#     (infra/cloudwatch-usage-dashboard.json). No separate dashboard step.
 #
 # Auth: OIDC role-assume against the shared deploy role. The role's trust
 # policy already covers repo:WodifyLLC/*:*. Its permission policy needs the
-# ECR-push + CloudWatch-dashboard actions documented in infra/IAM-CI-SETUP.md
-# before this workflow can succeed.
+# ECR-push actions documented in infra/IAM-CI-SETUP.md before this workflow
+# can succeed.
 
 on:
   push:
@@ -33,7 +33,6 @@ env:
   AWS_REGION: us-east-1
   ECR_REGISTRY: 212972612334.dkr.ecr.us-east-1.amazonaws.com
   ECR_REPO: productboard-mcp
-  DASHBOARD_STACK: productboard-mcp-dashboard
 
 jobs:
   deploy:
@@ -72,22 +71,12 @@ jobs:
             --push .
           echo "Pushed :latest and :sha-${GITHUB_SHA::12}. ECS auto-redeploy will pick it up."
 
-      - name: Deploy usage dashboard (CloudFormation)
-        run: |
-          node scripts/build-dashboard-stack.mjs
-          aws cloudformation deploy \
-            --stack-name "$DASHBOARD_STACK" \
-            --template-file infra/cloudwatch-usage-dashboard.cfn.json \
-            --region "$AWS_REGION" \
-            --no-fail-on-empty-changeset
-          echo "Dashboard stack synced."
-
       - name: Summary
         run: |
           {
             echo "## Deploy complete"
             echo "- Image: \`$ECR_REGISTRY/$ECR_REPO:latest\` (+ \`:sha-${GITHUB_SHA::12}\`)"
             echo "- ECS: auto-redeploy triggered by the ECR push (EventBridge)"
-            echo "- Dashboard: stack \`$DASHBOARD_STACK\` synced"
+            echo "- Dashboard: self-registers when the new task boots"
             echo "- [Open dashboard](https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards/dashboard/Productboard-MCP-Usage-Monitoring)"
           } >> "$GITHUB_STEP_SUMMARY"
