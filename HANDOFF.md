@@ -169,8 +169,11 @@ dashboard included — but it needs the **ECS task role** to have
   name; PutDashboard is create-or-replace) and the manual step is never needed
   again.
 
-Matt was on vacation when this was set up, hence the two-step approach. Hand him
-`infra/IAM-TASK-ROLE.md` when he's back.
+- **Owners:** **Anthony Reyes and Mike Schappell own driving this to done** —
+  including all communication with Matt Shank to get the task-role change made
+  in his `wodify-custom-mcp-deploy` CloudFormation template. Hand Matt
+  `infra/IAM-TASK-ROLE.md` (it has the exact template snippet he needs). Matt
+  was on vacation when this was set up, hence the current two-step approach.
 
 ---
 
