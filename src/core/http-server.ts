@@ -2,11 +2,11 @@
  * HTTP transport for productboard-mcp.
  *
  * Routes:
- *   GET  /healthz           → 200 { ok, version, uptime, sessions }
+ *   GET  /healthz           → 200 { ok, version, uptime }
  *   GET  /mcp               → 200 (ALB health-check; matches g-suite-mcp)
- *   POST /mcp               → MCP Streamable HTTP transport (bearer-protected
- *                              when OAuth is enabled)
- *   DELETE /mcp             → terminate a session by ID
+ *   POST /mcp               → MCP Streamable HTTP transport, stateless
+ *                              (bearer-protected when OAuth is enabled)
+ *   DELETE /mcp             → 405 (no sessions to terminate)
  *
  * When OAuth is enabled (MCP_PUBLIC_URL + GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET
  * set), the following are also mounted:
@@ -25,10 +25,8 @@
  */
 
 import express, { type Request, type Response, type RequestHandler } from 'express';
-import { randomUUID } from 'node:crypto';
 import { Server as HTTPServer } from 'node:http';
 import { OAuth2Client } from 'google-auth-library';
-import { Server as MCPSDKServer } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { mcpAuthRouter } from '@modelcontextprotocol/sdk/server/auth/router.js';
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
@@ -36,24 +34,9 @@ import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middlew
 import { ProductboardMCPServer } from './server.js';
 import { Logger } from '@utils/logger.js';
 import { makeAccessLog } from './access-log.js';
+import { dropUnsupportedProtocolVersion } from './protocol-version.js';
 import { McpOAuthProvider } from '@auth/mcp-oauth-provider.js';
 import { appendPath } from '@auth/google-oauth-config.js';
-
-// Inline helper: the SDK exports `isInitializeRequest` from types.js at runtime
-// but moduleResolution: node fails to see it through the wildcard subpath
-// export. Re-implement locally — the protocol method name is stable.
-function isInitializeRequest(body: unknown): boolean {
-  return (
-    !!body &&
-    typeof body === 'object' &&
-    (body as { method?: unknown }).method === 'initialize'
-  );
-}
-
-interface Session {
-  transport: StreamableHTTPServerTransport;
-  mcp: MCPSDKServer;
-}
 
 export interface HttpServerHandle {
   close: () => Promise<void>;
@@ -90,7 +73,6 @@ export async function startHttpServer(
   // so debug-level body peek has something to capture.
   app.use(makeAccessLog(logger));
 
-  const sessions = new Map<string, Session>();
   const startedAt = Date.now();
 
   app.get('/healthz', (_req: Request, res: Response) => {
@@ -98,7 +80,6 @@ export async function startHttpServer(
       ok: true,
       version,
       uptime: Math.floor((Date.now() - startedAt) / 1000),
-      sessions: sessions.size,
       oauth: !!oauth,
     });
   });
@@ -269,64 +250,34 @@ export async function startHttpServer(
         })
       : (_req, _res, next) => next();
 
+  // Stateless, like g-suite-mcp: every POST /mcp gets a fresh transport and
+  // MCP server, handles that one request, and is torn down. No session IDs,
+  // so there's nothing to lose on a redeploy and no "first call must be
+  // initialize" rule. That rule's HTTP 400 is what broke the connector on
+  // 2026-11-13, when Claude started opening with a `server/discover` request
+  // and stopped falling back after a 400.
   app.post('/mcp', mcpAuthMiddleware, async (req: Request & { auth?: { extra?: { user_email?: string } } }, res: Response) => {
+    const userEmail =
+      typeof req.auth?.extra?.user_email === 'string' ? req.auth.extra.user_email : undefined;
+
+    const droppedVersion = dropUnsupportedProtocolVersion(req);
+    if (droppedVersion) {
+      logger.info("POST /mcp: dropped protocol version the SDK doesn't support", {
+        mcp_protocol_version: droppedVersion,
+        mcp_method: (req.body as { method?: unknown } | undefined)?.method,
+        userEmail,
+      });
+    }
+
+    let transport: StreamableHTTPServerTransport | undefined;
     try {
-      const userEmail =
-        typeof req.auth?.extra?.user_email === 'string' ? req.auth.extra.user_email : undefined;
-      const sessionId = req.header('mcp-session-id') || req.header('Mcp-Session-Id');
-      let session: Session | undefined = sessionId ? sessions.get(sessionId) : undefined;
-
-      if (!session) {
-        // No existing session — only accept a new one on an initialize request.
-        if (sessionId) {
-          res.status(404).json({
-            jsonrpc: '2.0',
-            error: { code: -32001, message: 'Session not found' },
-            id: null,
-          });
-          return;
-        }
-        if (!isInitializeRequest(req.body)) {
-          res.status(400).json({
-            jsonrpc: '2.0',
-            error: {
-              code: -32000,
-              message: 'Missing Mcp-Session-Id; first call must be initialize',
-            },
-            id: null,
-          });
-          return;
-        }
-
-        const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => randomUUID(),
-          onsessioninitialized: (id: string) => {
-            const s = { transport, mcp };
-            sessions.set(id, s);
-            logger.debug(`MCP session opened: ${id} (active: ${sessions.size})`, { userEmail });
-          },
-        });
-
-        const mcp = server.createMcpServer();
-        transport.onclose = () => {
-          // Do NOT call mcp.close() here. The SDK's Server.close() internally
-          // calls transport.close(), which re-triggers this onclose handler,
-          // which would call mcp.close() again — infinite recursion until
-          // RangeError: Maximum call stack size exceeded. Observed on task
-          // shutdown after SIGTERM. The transport is the lifecycle owner;
-          // once it's closed the Server is effectively dead with no separate
-          // resources to release.
-          if (transport.sessionId) {
-            sessions.delete(transport.sessionId);
-            logger.debug(`MCP session closed: ${transport.sessionId} (active: ${sessions.size})`);
-          }
-        };
-
-        await mcp.connect(transport);
-        session = { transport, mcp };
-      }
-
-      await session.transport.handleRequest(req, res, req.body);
+      transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+      res.on('close', () => {
+        transport?.close().catch(() => {});
+      });
+      const mcp = server.createMcpServer();
+      await mcp.connect(transport);
+      await transport.handleRequest(req, res, req.body);
     } catch (err) {
       logger.error('POST /mcp failed', err);
       if (!res.headersSent) {
@@ -344,24 +295,9 @@ export async function startHttpServer(
     res.status(200).json({ ok: true, transport: 'streamable-http', method: 'POST' });
   });
 
-  app.delete('/mcp', async (req: Request, res: Response) => {
-    const sessionId = req.header('mcp-session-id') || req.header('Mcp-Session-Id');
-    if (!sessionId) {
-      res.status(400).json({ error: 'Missing Mcp-Session-Id header' });
-      return;
-    }
-    const session = sessions.get(sessionId);
-    if (!session) {
-      res.status(404).json({ error: 'Session not found' });
-      return;
-    }
-    try {
-      await session.transport.close();
-      res.status(204).end();
-    } catch (err) {
-      logger.error(`Error closing session ${sessionId}`, err);
-      res.status(500).json({ error: 'Failed to close session' });
-    }
+  // No sessions in stateless mode, so there's nothing to terminate.
+  app.delete('/mcp', (_req: Request, res: Response) => {
+    res.status(405).set('Allow', 'GET, POST').send('Method Not Allowed (stateless mode)');
   });
 
   const httpServer: HTTPServer = await new Promise<HTTPServer>((resolve, reject) => {
@@ -376,12 +312,6 @@ export async function startHttpServer(
     port,
     close: async () => {
       logger.info('Closing HTTP server...');
-      await Promise.all(
-        Array.from(sessions.values()).map((s) =>
-          s.transport.close().catch((err) => logger.warn('Error closing session', err)),
-        ),
-      );
-      sessions.clear();
       await new Promise<void>((resolve, reject) =>
         httpServer.close((err) => (err ? reject(err) : resolve())),
       );
