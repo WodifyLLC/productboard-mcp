@@ -47,7 +47,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::212972612334:role/wodify-github-custom-mcp-deploy
+          role-to-assume: arn:aws:iam::212972612334:role/productboard-mcp-github-ecr-push
           aws-region: us-east-1
 
       - name: Set up QEMU (arm64 emulation)
