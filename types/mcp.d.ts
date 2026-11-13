@@ -2,6 +2,9 @@
 // The actual SDK uses complex Zod schemas, so we provide simplified but compatible types
 
 declare module '@modelcontextprotocol/sdk/types.js' {
+  /** Protocol versions the installed SDK accepts (newest first). */
+  export const SUPPORTED_PROTOCOL_VERSIONS: string[];
+
   export enum ErrorCode {
     ConnectionClosed = -1,
     ParseError = -32700,
